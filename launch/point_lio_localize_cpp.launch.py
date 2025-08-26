@@ -27,14 +27,15 @@ def generate_launch_description():
 	# Point-LIO node
 	point_lio_dir = get_package_share_directory("point_lio")
 	point_lio_cfg = os.path.join(point_lio_dir, "config", "mid360.yaml")
-	point_lio_params_list = []
+
+	point_lio_params = []
 	if os.path.exists(point_lio_cfg):
-		point_lio_params_list.append(point_lio_cfg)
+		point_lio_params.append(point_lio_cfg)
 
 	point_lio_node = Node(
 		package="point_lio",
 		executable="pointlio_mapping",
-		parameters=point_lio_params_list,
+		parameters=point_lio_params,
 		remappings=[("/tf", "tf"), ("/tf_static", "tf_static")],
 		output="screen",
 	)
