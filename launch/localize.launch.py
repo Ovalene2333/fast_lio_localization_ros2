@@ -11,7 +11,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
 	rviz_arg = DeclareLaunchArgument('rviz', default_value='true')
 	use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value='false')
-	map_arg = DeclareLaunchArgument('map', default_value='/home/ovalene/xjtu_nav25/src/rm_localization/Point-LIO/PCD/red/map.pcd')
+	map_arg = DeclareLaunchArgument('map', default_value='/home/xjturm/xjtu_nav25/src/rm_localization/Point-LIO/PCD/red/map.pcd')
 
 	# FAST_LIO mapping node is ROS1 in original launch; not included here.
 
