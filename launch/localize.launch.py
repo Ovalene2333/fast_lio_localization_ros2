@@ -6,12 +6,17 @@ from launch.actions import DeclareLaunchArgument, GroupAction
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+import os
 
 
 def generate_launch_description():
 	rviz_arg = DeclareLaunchArgument('rviz', default_value='true')
 	use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value='false')
-	map_arg = DeclareLaunchArgument('map', default_value='/home/xjturm/xjtu_nav25/src/rm_localization/Point-LIO/PCD/red/map.pcd')
+
+	# Resolve default map path relative to this file to avoid hardcoded user paths
+	script_dir = os.path.dirname(__file__)
+	default_map_path = os.path.abspath(os.path.join(script_dir, '..', '..', 'Point-LIO', 'PCD', 'red', 'map.pcd'))
+	map_arg = DeclareLaunchArgument('map', default_value=default_map_path)
 
 	# FAST_LIO mapping node is ROS1 in original launch; not included here.
 
