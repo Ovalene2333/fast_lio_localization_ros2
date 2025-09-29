@@ -22,8 +22,7 @@
 #include <pcl/point_cloud.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/registration/icp.h>
-#include <pcl/features/normal_3d_omp.h>
-#include <pcl/search/kdtree.h>
+#include <pcl/registration/gicp.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 class GlobalLocalizationNode : public rclcpp::Node {
@@ -41,8 +40,7 @@ public:
 		this->declare_parameter<std::string>("map_frame", "map3d");
 		this->declare_parameter<std::string>("odom_frame", "camera_init");
 		this->declare_parameter<std::string>("base_link_frame", "base_link");
-		// Keep param for compatibility; not used
-		this->declare_parameter<bool>("use_gicp", false);
+		this->declare_parameter<bool>("use_gicp", true);
 
 		// QoS
 		rclcpp::QoS qos_reliable(10);
@@ -102,7 +100,7 @@ private:
 		return filtered;
 	}
 
-	pcl::PointCloud<pcl::PointNormal>::Ptr cropGlobalMapInFOV(const pcl::PointCloud<pcl::PointNormal>::ConstPtr &global_map,
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cropGlobalMapInFOV(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &global_map,
 			const Eigen::Matrix4d &pose_estimation,
 			const nav_msgs::msg::Odometry &cur_odom) {
 		Eigen::Matrix4d T_odom_to_base = poseToMat(cur_odom);
@@ -112,7 +110,7 @@ private:
 		double FOV = this->get_parameter("fov").as_double();
 		double FOV_FAR = this->get_parameter("fov_far").as_double();
 
-		auto submap = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>());
+		auto submap = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
 		submap->points.reserve(global_map->points.size() / 10);
 		for (const auto &pt_map : global_map->points) {
 			Eigen::Vector4d pm(pt_map.x, pt_map.y, pt_map.z, 1.0);
@@ -128,13 +126,7 @@ private:
 				in = (x > 0.0) && (x < FOV_FAR) && (std::fabs(ang) < FOV / 2.0);
 			}
 			if (in) {
-				pcl::PointNormal p;
-				p.x = static_cast<float>(pt_map.x);
-				p.y = static_cast<float>(pt_map.y);
-				p.z = static_cast<float>(pt_map.z);
-				p.normal_x = pt_map.normal_x;
-				p.normal_y = pt_map.normal_y;
-				p.normal_z = pt_map.normal_z;
+				pcl::PointXYZ p; p.x = static_cast<float>(pt_map.x); p.y = static_cast<float>(pt_map.y); p.z = static_cast<float>(pt_map.z);
 				submap->points.push_back(p);
 			}
 		}
@@ -143,12 +135,7 @@ private:
 
 		// Publish for debug (downsampled for bandwidth)
 		if (!submap->empty()) {
-			auto ds = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
-			ds->points.reserve(submap->points.size());
-			for (const auto &pn : submap->points) {
-				pcl::PointXYZ p; p.x = pn.x; p.y = pn.y; p.z = pn.z; ds->points.push_back(p);
-			}
-			ds->width = static_cast<uint32_t>(ds->points.size()); ds->height = 1; ds->is_dense = false;
+			auto ds = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(*submap));
 			if (ds->size() > 200000) ds->points.resize(200000);
 			sensor_msgs::msg::PointCloud2 msg;
 			pcl::toROSMsg(*ds, msg);
@@ -159,67 +146,43 @@ private:
 		return submap;
 	}
 
-	// Estimate normals and build PointNormal for scan
-	static pcl::PointCloud<pcl::PointNormal>::Ptr buildScanWithNormals(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &scan_xyz, double radius) {
-		pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> ne;
-		ne.setInputCloud(scan_xyz);
-		pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
-		ne.setSearchMethod(tree);
-		if (radius > 0.0) ne.setRadiusSearch(radius); else ne.setKSearch(20);
-		auto normals = pcl::PointCloud<pcl::Normal>::Ptr(new pcl::PointCloud<pcl::Normal>());
-		ne.compute(*normals);
-		auto out = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>());
-		out->points.resize(scan_xyz->points.size());
-		for (size_t i = 0; i < scan_xyz->points.size(); ++i) {
-			pcl::PointNormal pn;
-			pn.x = scan_xyz->points[i].x;
-			pn.y = scan_xyz->points[i].y;
-			pn.z = scan_xyz->points[i].z;
-			pn.normal_x = normals->points[i].normal_x;
-			pn.normal_y = normals->points[i].normal_y;
-			pn.normal_z = normals->points[i].normal_z;
-			out->points[i] = pn;
-		}
-		out->width = static_cast<uint32_t>(out->points.size()); out->height = 1; out->is_dense = false;
-		return out;
-	}
-
-	static pcl::PointCloud<pcl::PointNormal>::Ptr voxelDownSampleNormals(const pcl::PointCloud<pcl::PointNormal>::ConstPtr &cloud, double voxel) {
-		pcl::VoxelGrid<pcl::PointNormal> vg;
-		vg.setLeafSize(voxel, voxel, voxel);
-		vg.setInputCloud(cloud);
-		auto filtered = pcl::PointCloud<pcl::PointNormal>::Ptr(new pcl::PointCloud<pcl::PointNormal>());
-		vg.filter(*filtered);
-		return filtered;
-	}
-
 	std::pair<Eigen::Matrix4d, double> registrationAtScale(const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &scan,
-			const pcl::PointCloud<pcl::PointNormal>::ConstPtr &map,
+			const pcl::PointCloud<pcl::PointXYZ>::ConstPtr &map,
 			const Eigen::Matrix4d &initial, double scale) {
 		double scan_voxel = this->get_parameter("scan_voxel_size").as_double() * scale;
 		double map_voxel = this->get_parameter("map_voxel_size").as_double() * scale;
-		// Downsample scan first (XYZ), then estimate normals to reduce cost
-		auto ds_scan_xyz = voxelDownSample(scan, std::max(0.01, scan_voxel));
-		// Estimate normals for scan with a radius tied to voxel size
-		double normal_radius = std::max(0.02, 2.5 * scan_voxel);
-		auto ds_scan = buildScanWithNormals(ds_scan_xyz, normal_radius);
+		auto ds_scan = voxelDownSample(scan, std::max(0.01, scan_voxel));
+		auto ds_map = voxelDownSample(map, std::max(0.01, map_voxel));
 
-		 // 使用预先降采样的全局地图
-		auto ds_map = global_map_ds_ ? global_map_ds_ : map;
-
-		pcl::IterativeClosestPointWithNormals<pcl::PointNormal, pcl::PointNormal> icp;
-		icp.setMaxCorrespondenceDistance(1.0 * scale);
-		icp.setMaximumIterations(35);
-		icp.setTransformationEpsilon(1e-8);
-		icp.setEuclideanFitnessEpsilon(1e-8);
-		icp.setInputSource(ds_scan);
-		icp.setInputTarget(ds_map);
-		pcl::PointCloud<pcl::PointNormal> aligned;
+		bool use_gicp = this->get_parameter("use_gicp").as_bool();
+		pcl::PointCloud<pcl::PointXYZ> aligned;
 		Eigen::Matrix4f initf = initial.cast<float>();
-		icp.align(aligned, initf);
-		Eigen::Matrix4d T = icp.getFinalTransformation().cast<double>();
-		double mse = icp.getFitnessScore(1.0 * scale); // lower is better
-		return {T, mse};
+
+		if (use_gicp) {
+			pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+			icp.setMaxCorrespondenceDistance(1.0 * scale);
+			icp.setMaximumIterations(35);
+			icp.setTransformationEpsilon(1e-8);
+			icp.setEuclideanFitnessEpsilon(1e-8);
+			icp.setInputSource(ds_scan);
+			icp.setInputTarget(ds_map);
+			icp.align(aligned, initf);
+			Eigen::Matrix4d T = icp.getFinalTransformation().cast<double>();
+			double mse = icp.getFitnessScore(1.0 * scale); // lower is better
+			return {T, mse};
+		} else {
+			pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+			icp.setMaxCorrespondenceDistance(1.0 * scale);
+			icp.setMaximumIterations(35);
+			icp.setTransformationEpsilon(1e-8);
+			icp.setEuclideanFitnessEpsilon(1e-8);
+			icp.setInputSource(ds_scan);
+			icp.setInputTarget(ds_map);
+			icp.align(aligned, initf);
+			Eigen::Matrix4d T = icp.getFinalTransformation().cast<double>();
+			double mse = icp.getFitnessScore(1.0 * scale); // lower is better
+			return {T, mse};
+		}
 	}
 
 	void publishInitialPose() {
@@ -337,21 +300,14 @@ private:
 		pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
 		pcl::fromROSMsg(*msg, *cloud);
 		double voxel = this->get_parameter("map_voxel_size").as_double();
-		// Downsample first for efficiency, then estimate normals once (static map)
-		auto ds_map_xyz = voxelDownSample(cloud, std::max(0.01, voxel));
-		// Estimate normals with radius based on voxel size
-		double normal_radius = std::max(0.02, 2.5 * voxel);
-		global_map_ = buildScanWithNormals(ds_map_xyz, normal_radius);
-		// 预先降采样带法线的全局地图
-		global_map_ds_ = voxelDownSampleNormals(global_map_, std::max(0.01, voxel));
-		RCLCPP_INFO(this->get_logger(), "Global map received. points=%zu (downsampled + normals)", global_map_->points.size());
+		global_map_ = voxelDownSample(cloud, std::max(0.01, voxel));
+		RCLCPP_INFO(this->get_logger(), "Global map received. points=%zu (downsampled)", global_map_->points.size());
 	}
 
 	// Members
 	std::atomic<bool> alive_{true};
 	std::thread worker_;
-	pcl::PointCloud<pcl::PointNormal>::Ptr global_map_;
-	pcl::PointCloud<pcl::PointNormal>::Ptr global_map_ds_; // 新增：缓存降采样后的全局地图
+	pcl::PointCloud<pcl::PointXYZ>::Ptr global_map_;
 	pcl::PointCloud<pcl::PointXYZ>::Ptr cur_scan_;
 	nav_msgs::msg::Odometry::SharedPtr cur_odom_;
 
@@ -373,4 +329,4 @@ int main(int argc, char** argv) {
 	rclcpp::spin(node);
 	rclcpp::shutdown();
 	return 0;
-}
+} 

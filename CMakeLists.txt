@@ -12,7 +12,7 @@ find_package(std_msgs REQUIRED)
 
 # C++ deps
 find_package(rclcpp REQUIRED)
-find_package(PCL REQUIRED COMPONENTS io filters registration)
+find_package(PCL REQUIRED COMPONENTS io filters registration features)
 find_package(pcl_conversions REQUIRED)
 find_package(Eigen3 REQUIRED)
 

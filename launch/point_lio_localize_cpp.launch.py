@@ -14,7 +14,7 @@ import os
 def generate_launch_description():
 	rviz_arg = DeclareLaunchArgument('rviz', default_value='true')
 	use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value='true')
-	map_arg = DeclareLaunchArgument('map', default_value=PathJoinSubstitution([FindPackageShare('point_lio'), 'PCD', 'blue', 'map.pcd']))
+	map_arg = DeclareLaunchArgument('map', default_value=PathJoinSubstitution([FindPackageShare('rm_localization_bringup'), 'PCD', 'blue', 'map.pcd']))
 	# Tunable parameters for global localization
 	freq_localization_arg = DeclareLaunchArgument('freq_localization', default_value='0.5')
 	localization_th_arg = DeclareLaunchArgument('localization_th', default_value='0.05')

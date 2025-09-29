@@ -3,9 +3,10 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 import os
 
 
@@ -14,9 +15,7 @@ def generate_launch_description():
 	use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value='false')
 
 	# Resolve default map path relative to this file to avoid hardcoded user paths
-	script_dir = os.path.dirname(__file__)
-	default_map_path = os.path.abspath(os.path.join(script_dir, '..', '..', 'Point-LIO', 'PCD', 'red', 'map.pcd'))
-	map_arg = DeclareLaunchArgument('map', default_value=default_map_path)
+	map_arg = DeclareLaunchArgument('map', default_value=PathJoinSubstitution([FindPackageShare('rm_localization_bringup'), 'PCD', 'blue', 'map.pcd']))
 
 	# FAST_LIO mapping node is ROS1 in original launch; not included here.
 
